@@ -19,25 +19,28 @@ def get_current_weather(location, unit='fahrenheit'):
         return json.dumps({'location': location, 'temperature': 'unknown'})
 
 
-def test():
+def test(fncall_prompt_type: str = 'qwen'):
     llm = get_chat_model({
         # Use the model service provided by DashScope:
-        'model': 'qwen1.5-14b-chat',
+        'model': 'qwen2.5-72b-instruct',
         'model_server': 'dashscope',
         'api_key': os.getenv('DASHSCOPE_API_KEY'),
+        'generate_cfg': {
+            'fncall_prompt_type': fncall_prompt_type
+        },
 
         # Use the OpenAI-compatible model service provided by DashScope:
-        # 'model': 'qwen1.5-14b-chat',
+        # 'model': 'qwen2.5-72b-instruct',
         # 'model_server': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         # 'api_key': os.getenv('DASHSCOPE_API_KEY'),
 
         # Use the model service provided by Together.AI:
-        # 'model': 'Qwen/Qwen1.5-14B-Chat',
+        # 'model': 'Qwen/qwen2.5-7b-instruct',
         # 'model_server': 'https://api.together.xyz',  # api_base
         # 'api_key': os.getenv('TOGETHER_API_KEY'),
 
         # Use your own model service compatible with OpenAI API:
-        # 'model': 'Qwen/Qwen1.5-72B-Chat',
+        # 'model': 'Qwen/qwen2.5-7b-instruct',
         # 'model_server': 'http://localhost:8000/v1',  # api_base
         # 'api_key': 'EMPTY',
     })
@@ -122,4 +125,8 @@ def test():
 
 
 if __name__ == '__main__':
+    # Run example of function calling with QwenFnCallPrompt
     test()
+
+    # Run example of function calling with NousFnCallPrompt
+    # test(fncall_prompt_type='nous')
