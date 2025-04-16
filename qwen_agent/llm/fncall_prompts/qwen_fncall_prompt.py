@@ -10,13 +10,12 @@ from qwen_agent.utils.utils import extract_text_from_message
 class QwenFnCallPrompt(BaseFnCallPrompt):
 
     @staticmethod
-    def preprocess_fncall_messages(
-        messages: List[Message],
-        functions: List[dict],
-        lang: Literal['en', 'zh'],
-        parallel_function_calls: bool = True,
-        function_choice: Union[Literal['auto'], str] = 'auto',
-    ) -> List[Message]:
+    def preprocess_fncall_messages(messages: List[Message],
+                                   functions: List[dict],
+                                   lang: Literal['en', 'zh'],
+                                   parallel_function_calls: bool = True,
+                                   function_choice: Union[Literal['auto'], str] = 'auto',
+                                   **kwargs) -> List[Message]:
         ori_messages = messages
 
         # Change function_call responses to plaintext responses:
@@ -63,7 +62,7 @@ class QwenFnCallPrompt(BaseFnCallPrompt):
         tool_descs = '\n\n'.join(get_function_description(function, lang=lang) for function in functions)
         tool_names = ','.join(function.get('name_for_model', function.get('name', '')) for function in functions)
         tool_system = tool_desc_template.format(tool_descs=tool_descs, tool_names=tool_names)
-        if messages[0].role == SYSTEM:
+        if messages and messages[0].role == SYSTEM:
             messages[0].content.append(ContentItem(text='\n\n' + tool_system))
         else:
             messages = [Message(role=SYSTEM, content=[ContentItem(text=tool_system)])] + messages
@@ -97,11 +96,10 @@ class QwenFnCallPrompt(BaseFnCallPrompt):
         return messages
 
     @staticmethod
-    def postprocess_fncall_messages(
-        messages: List[Message],
-        parallel_function_calls: bool = True,
-        function_choice: Union[Literal['auto'], str] = 'auto',
-    ) -> List[Message]:
+    def postprocess_fncall_messages(messages: List[Message],
+                                    parallel_function_calls: bool = True,
+                                    function_choice: Union[Literal['auto'], str] = 'auto',
+                                    **kwargs) -> List[Message]:
         messages = copy.deepcopy(messages)
 
         # Prepend a prefix for function_choice:
