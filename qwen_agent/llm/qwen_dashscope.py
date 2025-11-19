@@ -1,17 +1,18 @@
 # Copyright 2023 The Qwen team, Alibaba Group. All rights reserved.
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import os
 from http import HTTPStatus
 from pprint import pformat
@@ -21,7 +22,7 @@ import dashscope
 
 from qwen_agent.llm.base import ModelServiceError, register_llm
 from qwen_agent.llm.function_calling import BaseFnCallModel
-from qwen_agent.llm.schema import ASSISTANT, Message
+from qwen_agent.llm.schema import ASSISTANT, FunctionCall, Message
 from qwen_agent.log import logger
 
 
@@ -42,7 +43,9 @@ class QwenChatAtDS(BaseFnCallModel):
         messages = [msg.model_dump() for msg in messages]
         if messages[-1]['role'] == ASSISTANT:
             messages[-1]['partial'] = True
-        logger.debug(f'LLM Input:\n{pformat(messages, indent=2)}')
+        messages = self._conv_qwen_agent_messages_to_oai(messages)
+        logger.debug(f'LLM Input: \n{pformat(messages, indent=2)}')
+        logger.debug(f'LLM Input generate_cfg: \n{generate_cfg}')
         response = dashscope.Generation.call(
             self.model,
             messages=messages,  # noqa
@@ -62,7 +65,8 @@ class QwenChatAtDS(BaseFnCallModel):
         messages = [msg.model_dump() for msg in messages]
         if messages[-1]['role'] == ASSISTANT:
             messages[-1]['partial'] = True
-        logger.debug(f'LLM Input:\n{pformat(messages, indent=2)}')
+        messages = self._conv_qwen_agent_messages_to_oai(messages)
+        logger.debug(f'LLM Input: \n{pformat(messages, indent=2)}')
         response = dashscope.Generation.call(
             self.model,
             messages=messages,  # noqa
@@ -106,18 +110,51 @@ class QwenChatAtDS(BaseFnCallModel):
     def _full_stream_output(response) -> Iterator[List[Message]]:
         full_content = ''
         full_reasoning_content = ''
+        full_tool_calls = []
         for chunk in response:
             if chunk.status_code == HTTPStatus.OK:
                 if chunk.output.choices[0].message.get('reasoning_content', ''):
                     full_reasoning_content += chunk.output.choices[0].message.reasoning_content
                 if chunk.output.choices[0].message.content:
                     full_content += chunk.output.choices[0].message.content
-                yield [
-                    Message(role=ASSISTANT,
-                            content=full_content,
-                            reasoning_content=full_reasoning_content,
-                            extra={'model_service_info': chunk})
-                ]
+                tool_calls = chunk.output.choices[0].message.get('tool_calls', None)
+                if tool_calls:
+                    for tc in tool_calls:
+                        if full_tool_calls and (not tc['id'] or
+                                                tc['id'] == full_tool_calls[-1]['extra']['function_id']):
+                            if tc['function'].get('name', ''):
+                                full_tool_calls[-1].function_call['name'] += tc['function']['name']
+                            if tc['function'].get('arguments', ''):
+                                full_tool_calls[-1].function_call['arguments'] += tc['function']['arguments']
+                        else:
+                            full_tool_calls.append(
+                                Message(role=ASSISTANT,
+                                        content='',
+                                        function_call=FunctionCall(name=tc['function'].get('name', ''),
+                                                                   arguments=tc['function'].get('arguments', '')),
+                                        extra={
+                                            'model_service_info': json.loads(str(chunk)),
+                                            'function_id': tc['id']
+                                        }))
+                res = []
+                if full_reasoning_content:
+                    res.append(
+                        Message(role=ASSISTANT,
+                                content='',
+                                reasoning_content=full_reasoning_content,
+                                extra={
+                                    'model_service_info': json.loads(str(chunk)),
+                                }))
+                if full_content:
+                    res.append(
+                        Message(role=ASSISTANT,
+                                content=full_content,
+                                extra={
+                                    'model_service_info': json.loads(str(chunk)),
+                                }))
+                if full_tool_calls:
+                    res += full_tool_calls
+                yield res
             else:
                 raise ModelServiceError(code=chunk.code, message=chunk.message, extra={'model_service_info': chunk})
 
@@ -139,15 +176,17 @@ def initialize_dashscope(cfg: Optional[Dict] = None) -> None:
     api_key = api_key.strip()
     if api_key in ('', 'EMPTY'):
         if dashscope.api_key is None or dashscope.api_key in ('', 'EMPTY'):
-            logger.warning('No valid dashscope api_key found in cfg, environment variable `DASHSCOPE_API_KEY` or dashscope.api_key, the model call may raise errors.')
+            logger.warning(
+                'No valid dashscope api_key found in cfg, environment variable `DASHSCOPE_API_KEY` or dashscope.api_key, the model call may raise errors.'
+            )
         else:
             logger.info('No dashscope api_key found in cfg, using the dashscope.api_key that has already been set.')
-    else: # valid api_key
+    else:  # valid api_key
         if api_key != dashscope.api_key:
             logger.info('Setting the dashscope api_key.')
             dashscope.api_key = api_key
         # or do nothing since both keys are the same
-  
+
     if base_http_api_url is not None:
         dashscope.base_http_api_url = base_http_api_url.strip()
     if base_websocket_api_url is not None:
